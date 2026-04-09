@@ -1,0 +1,44 @@
+{
+  "telegram_bot_token": "8611408146:AAEsaRhPKJiweiVl22XrAR8TZOTn5xxtD8Y",
+  "telegram_chat_id": "1357505565",
+  "check_interval_seconds": 120,
+  "market_open": "09:15",
+  "market_close": "15:30",
+  "alerts": [
+    {
+      "symbol": "SUVEN",
+      "name": "Suven Pharma",
+      "buy_levels": [169, 161],
+      "stoploss": 146,
+      "notes": "EMA200 support, swing low"
+    },
+    {
+      "symbol": "SUPRIYA",
+      "name": "Supriya Lifescience",
+      "buy_levels": [607, 573],
+      "stoploss": 556,
+      "notes": "EMA20 support, swing low"
+    },
+    {
+      "symbol": "COHANCE",
+      "name": "Cohance Lifesciences",
+      "buy_levels": [306, 294],
+      "stoploss": 267,
+      "notes": "EMA20 support, swing low"
+    },
+    {
+      "symbol": "OSWALPUMPS",
+      "name": "Oswal Pumps",
+      "buy_levels": [354, 328],
+      "stoploss": 296,
+      "notes": "EMA50 retest, swing low"
+    },
+    {
+      "symbol": "DIGITIDE",
+      "name": "Digitide",
+      "buy_levels": [84, 82],
+      "stoploss": 74,
+      "notes": "EMA20 retest, swing low"
+    }
+  ]
+}
