@@ -145,19 +145,37 @@ def check_alerts(config, state):
         if price is None:
             continue
         
-        # Check buy levels
-        for level in alert["buy_levels"]:
+        # Check buy levels (price drops TO or BELOW level)
+        for level in alert.get("buy_levels", []):
             key = f"{sym}_BUY_{level}"
             if key in state["fired"]:
                 continue
             
             if price <= level:
-                msg = (f"🟢 <b>BUY ALERT</b>\n"
+                msg = (f"🟢 <b>BUY DIP</b>\n"
                        f"<b>{name}</b> ({sym})\n"
                        f"Price: ₹{price} (target: ₹{level})\n"
                        f"Notes: {alert.get('notes', '')}")
                 
-                print(f"  *** BUY: {name} at ₹{price} (level ₹{level})")
+                print(f"  *** BUY DIP: {name} at ₹{price} (level ₹{level})")
+                send_telegram(token, chat_id, msg)
+                state["fired"].append(key)
+                save_state(state)
+        
+        # Check breakout levels (price rises TO or ABOVE level)
+        for level in alert.get("breakout_levels", []):
+            key = f"{sym}_BREAKOUT_{level}"
+            if key in state["fired"]:
+                continue
+            
+            if price >= level:
+                msg = (f"🚀 <b>BREAKOUT</b>\n"
+                       f"<b>{name}</b> ({sym})\n"
+                       f"Price: ₹{price} crossed ₹{level}!\n"
+                       f"Resistance broken — consider adding\n"
+                       f"Notes: {alert.get('notes', '')}")
+                
+                print(f"  *** BREAKOUT: {name} at ₹{price} (level ₹{level})")
                 send_telegram(token, chat_id, msg)
                 state["fired"].append(key)
                 save_state(state)
