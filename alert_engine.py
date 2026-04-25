@@ -214,6 +214,19 @@ def print_status(config, prices):
 US_HOLDINGS = ["TQQQ", "NFLX", "MSFT", "NVDA", "XLE", "VWO"]
 US_INDICES = [("SPY", "S&P 500"), ("QQQ", "NASDAQ"), ("SOXX", "Semis")]
 
+# Momentum Pullback Watchlist — stocks/ETFs you WANT to enter on a dip
+# These are in strong uptrends; alert when they pull back 3-5% and bounce
+US_MOMENTUM_WATCHLIST = [
+    ("SOXX", "Semiconductors", "SOXL"),
+    ("SOXL", "3x Semis", None),
+    ("XLK", "Technology", "TECL"),
+    ("QQQ", "NASDAQ 100", "TQQQ"),
+    ("AMD", "AMD", None),
+    ("AVGO", "Broadcom", None),
+    ("TSM", "TSMC", None),
+    ("GDX", "Gold Miners", "NUGT"),
+]
+
 
 def us_analyze_52w(c):
     """52-week recovery analysis from a close price series."""
@@ -558,6 +571,119 @@ def run_us_daily_check(token, chat_id):
             actions.append(
                 f"🔥 <b>HOT SECTOR: {s['name']}</b> ({s['sym']})\n"
                 f"  1m:{s['ret_1m']:+.1f}% (SPY:{spy_1m:+.1f}%){lev_msg}"
+            )
+
+    # ── MOMENTUM PULLBACK WATCHLIST ──
+    # For stocks in strong uptrends that you want to enter on a dip.
+    # Based on historical analysis: after RSI 85+, median pullback is 2-3%,
+    # 25th percentile is 4-5%. Pullback typically happens within 10-14 days.
+    #
+    # Logic:
+    #   1. Stock was recently at/near highs (within 3% of 20-day high)
+    #   2. Has pulled back 3-5% from that high
+    #   3. Now showing bounce (above EMA3, positive daily return)
+    #   → ENTER on the pullback bounce
+    #
+    #   If no pullback after 14 days → "still running, consider entering anyway"
+
+    momentum_data = {}
+    for sym, name, lev in US_MOMENTUM_WATCHLIST:
+        if sym not in data:
+            try:
+                t = yf.Ticker(sym)
+                h = t.history(period="3mo", auto_adjust=True)
+                if not h.empty:
+                    h.index = h.index.tz_localize(None)
+                    momentum_data[sym] = h["Close"]
+            except Exception:
+                pass
+        else:
+            momentum_data[sym] = data[sym]
+
+    if momentum_data:
+        pullback_signals = []
+
+        for sym, name, lev in US_MOMENTUM_WATCHLIST:
+            if sym not in momentum_data:
+                continue
+            mc = momentum_data[sym]
+            if len(mc) < 20:
+                continue
+
+            price = mc.iloc[-1]
+            high_20d = mc.iloc[-20:].max()
+            dd_from_20d = (price / high_20d - 1) * 100
+
+            # EMA3 for quick bounce detection
+            ema3 = mc.ewm(span=3).mean().iloc[-1]
+            above_ema3 = price > ema3
+
+            # Daily return
+            daily_ret = (price / mc.iloc[-2] - 1) * 100 if len(mc) >= 2 else 0
+
+            # RSI
+            delta_m = mc.diff()
+            gain_m = delta_m.where(delta_m > 0, 0).rolling(14).mean()
+            loss_m = (-delta_m.where(delta_m < 0, 0)).rolling(14).mean()
+            rs_m = gain_m / (loss_m + 1e-10)
+            rsi_m = (100 - (100 / (1 + rs_m))).iloc[-1]
+
+            # 1-month return (is it in an uptrend?)
+            ret_1m = (price / mc.iloc[-21] - 1) * 100 if len(mc) >= 22 else 0
+
+            # Determine signal
+            signal = "NONE"
+            detail = ""
+
+            if dd_from_20d <= -3 and dd_from_20d >= -8 and above_ema3 and daily_ret > 0.5 and ret_1m > 5:
+                # Pulled back 3-8% from recent high, now bouncing, in uptrend
+                signal = "ENTER"
+                detail = f"Pulled back {dd_from_20d:+.1f}%, now bouncing"
+            elif dd_from_20d <= -3 and dd_from_20d >= -8 and ret_1m > 5:
+                # Pulled back but not bouncing yet
+                signal = "WATCH"
+                detail = f"Pulled back {dd_from_20d:+.1f}%, waiting for bounce"
+            elif dd_from_20d > -1 and rsi_m > 80 and ret_1m > 15:
+                # At highs, very overbought, strong trend — wait for pullback
+                signal = "WAIT_FOR_DIP"
+                detail = f"RSI {rsi_m:.0f}, at highs, wait for 3-5% pullback"
+            elif dd_from_20d > -3 and ret_1m > 10:
+                # Near highs, good trend, small pullback might be enough
+                signal = "NEAR_HIGH"
+                detail = f"Only {dd_from_20d:+.1f}% from high"
+
+            pullback_signals.append({
+                "sym": sym, "name": name, "lev": lev,
+                "price": price, "dd": dd_from_20d, "rsi": rsi_m,
+                "ret_1m": ret_1m, "signal": signal, "detail": detail,
+            })
+
+        # Show watchlist status
+        enters = [s for s in pullback_signals if s["signal"] == "ENTER"]
+        watches = [s for s in pullback_signals if s["signal"] == "WATCH"]
+        waits = [s for s in pullback_signals if s["signal"] == "WAIT_FOR_DIP"]
+
+        if enters or watches or waits:
+            lines.append("\n<b>📋 Momentum Watchlist:</b>")
+
+            for s in pullback_signals:
+                if s["signal"] == "NONE":
+                    continue
+                lev_str = f" ({s['lev']})" if s['lev'] else ""
+                if s["signal"] == "ENTER":
+                    lines.append(f"  🎯 {s['name']}{lev_str}: ${s['price']:.2f} — <b>ENTER</b> {s['detail']}")
+                elif s["signal"] == "WATCH":
+                    lines.append(f"  🟡 {s['name']}{lev_str}: ${s['price']:.2f} — {s['detail']}")
+                elif s["signal"] == "WAIT_FOR_DIP":
+                    lines.append(f"  ⏳ {s['name']}{lev_str}: ${s['price']:.2f} — {s['detail']}")
+
+        # Add ENTER signals to actions
+        for s in enters:
+            lev_msg = f"\n  Leveraged: {s['lev']}" if s['lev'] else ""
+            actions.append(
+                f"🎯 <b>PULLBACK ENTRY: {s['name']}</b> ({s['sym']})\n"
+                f"  {s['detail']}\n"
+                f"  1m:{s['ret_1m']:+.1f}% RSI:{s['rsi']:.0f}{lev_msg}"
             )
 
     # Actions
