@@ -249,7 +249,7 @@ def us_compute_dip_score(c):
     high_40d = c.iloc[-40:].max() if len(c) >= 40 else c.max()
     dd_40d = (price / high_40d - 1) * 100
 
-    if dd_40d > -5:
+    if dd_40d > -10:
         return 0, 0, False  # not in dip
 
     # RSI
