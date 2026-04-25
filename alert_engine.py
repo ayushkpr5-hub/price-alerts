@@ -399,7 +399,7 @@ def run_us_daily_check(token, chat_id):
         elif r["dd"] <= -5 and recovering and (r["ret_1m"] > 3 or r["ret_1w"] > 2):
             emoji = "🟠"
             tag = f" ← <b>ADD</b> (1w:{r['ret_1w']:+.0f}%, {r['upside']:.0f}% upside)"
-            actions.append(f"🟠 <b>ADD {sym}</b> — Recovery\n"
+            actions.append(f"🟠 <b>[RECOVERY] ADD {sym}</b>\n"
                            f"  ${r['price']:.2f} ({r['dd']:+.1f}% from 52w hi)\n"
                            f"  1w:{r['ret_1w']:+.1f}% 1m:{r['ret_1m']:+.1f}%, {r['upside']:.0f}% upside\n"
                            f"  RSI: {r['rsi']:.0f}")
@@ -423,7 +423,7 @@ def run_us_daily_check(token, chat_id):
             dip_score, div_count, dd_40d = us_compute_dip_score(c)
             if dip_score >= 40:
                 div_label = {0: "", 1: "single", 2: "double", 3: "triple"}.get(div_count, "")
-                dip_msg = f"🔍 <b>DIP SIGNAL: {sym}</b> (score {dip_score})"
+                dip_msg = f"🔍 <b>[DIP] {sym}</b> (score {dip_score})"
                 if div_label:
                     dip_msg += f"\n  RSI {div_label} divergence detected"
                 if dip_score >= 60:
@@ -431,6 +431,10 @@ def run_us_daily_check(token, chat_id):
                 actions.append(dip_msg)
 
     # ── SECTOR MOMENTUM SCANNER ──
+    # Note: wait_for_dip_syms is populated by momentum pullback section below.
+    # We initialize it here and the sector scanner will filter at the end.
+    wait_for_dip_syms = set()
+
     # Same reversal-confirmation logic as per-stock dip detector,
     # applied to sector ETFs to find entry points in sectors you don't own.
     #
@@ -554,22 +558,25 @@ def run_us_daily_check(token, chat_id):
                          f"vs SPY:{s['rs_1m']:+.0f}%{lev}{entry_tag}")
 
         # Generate action alerts for ENTER signals
-        enter_sectors = [s for s in sector_results if s["entry"] == "ENTER"]
+        # Skip if momentum watchlist says "wait for pullback" (avoid contradiction)
+        enter_sectors = [s for s in sector_results
+                         if s["entry"] == "ENTER" and s["sym"] not in wait_for_dip_syms]
         for s in enter_sectors:
             lev_msg = f"\n  Leveraged ETF: {s['leveraged']}" if s['leveraged'] else ""
             actions.append(
-                f"⚡ <b>SECTOR ENTRY: {s['name']}</b> ({s['sym']})\n"
-                f"  Was in dip, now bouncing with confirmation\n"
+                f"⚡ <b>[SECTOR] {s['name']}</b> ({s['sym']})\n"
+                f"  Dip recovery confirmed\n"
                 f"  1w:{s['ret_1w']:+.1f}% 1m:{s['ret_1m']:+.1f}% vs SPY:{s['rs_1m']:+.1f}%\n"
                 f"  Above EMA5 ✓ RSI:{s['rsi']:.0f}{lev_msg}"
             )
 
-        # Also alert on HOT sectors
-        hot_sectors = [s for s in sector_results if s["entry"] == "HOT"]
+        # Also alert on HOT sectors (skip if in wait list)
+        hot_sectors = [s for s in sector_results
+                       if s["entry"] == "HOT" and s["sym"] not in wait_for_dip_syms]
         for s in hot_sectors:
             lev_msg = f"\n  Leveraged ETF: {s['leveraged']}" if s['leveraged'] else ""
             actions.append(
-                f"🔥 <b>HOT SECTOR: {s['name']}</b> ({s['sym']})\n"
+                f"🔥 <b>[SECTOR] HOT: {s['name']}</b> ({s['sym']})\n"
                 f"  1m:{s['ret_1m']:+.1f}% (SPY:{spy_1m:+.1f}%){lev_msg}"
             )
 
@@ -658,6 +665,10 @@ def run_us_daily_check(token, chat_id):
                 "ret_1m": ret_1m, "signal": signal, "detail": detail,
             })
 
+        # Collect symbols where momentum watchlist says "wait for pullback"
+        # so sector scanner actions can be filtered
+        wait_for_dip_syms.update(s["sym"] for s in pullback_signals if s["signal"] == "WAIT_FOR_DIP")
+
         # Show watchlist status
         enters = [s for s in pullback_signals if s["signal"] == "ENTER"]
         watches = [s for s in pullback_signals if s["signal"] == "WATCH"]
@@ -681,12 +692,24 @@ def run_us_daily_check(token, chat_id):
         for s in enters:
             lev_msg = f"\n  Leveraged: {s['lev']}" if s['lev'] else ""
             actions.append(
-                f"🎯 <b>PULLBACK ENTRY: {s['name']}</b> ({s['sym']})\n"
+                f"🎯 <b>[PULLBACK] {s['name']}</b> ({s['sym']})\n"
                 f"  {s['detail']}\n"
                 f"  1m:{s['ret_1m']:+.1f}% RSI:{s['rsi']:.0f}{lev_msg}"
             )
 
-    # Actions
+    # Actions — remove any sector ENTER that conflicts with momentum "wait for pullback"
+    if wait_for_dip_syms:
+        filtered_actions = []
+        for a in actions:
+            skip = False
+            for sym in wait_for_dip_syms:
+                if f"[SECTOR]" in a and sym in a:
+                    skip = True
+                    break
+            if not skip:
+                filtered_actions.append(a)
+        actions = filtered_actions
+
     if actions:
         lines.append("\n<b>🎯 ACTIONS:</b>")
         for a in actions:
