@@ -366,14 +366,14 @@ def run_us_daily_check(token, chat_id):
         if r["dd"] > -3:
             emoji = "🟢"
             tag = ""
-        elif r["dd"] <= -10 and r["above_20"] and r["ret_1m"] > 5:
+        elif r["dd"] <= -5 and r["above_20"] and r["ret_1m"] > 5:
             emoji = "🟠"
             tag = f" ← <b>ADD</b> (+{r['ret_1m']:.0f}% 1m, {r['upside']:.0f}% upside)"
             actions.append(f"🟠 <b>ADD {sym}</b> — Recovery rally\n"
                            f"  ${r['price']:.2f} ({r['dd']:+.1f}% from 52w hi)\n"
                            f"  +{r['ret_1m']:.0f}% in 1m, {r['upside']:.0f}% upside\n"
                            f"  RSI: {r['rsi']:.0f}")
-        elif r["dd"] <= -10 and r["above_20"]:
+        elif r["dd"] <= -5 and r["above_20"]:
             emoji = "🟡"
             tag = f" ← WATCH ({r['upside']:.0f}% upside)"
         elif r["dd"] <= -10:
