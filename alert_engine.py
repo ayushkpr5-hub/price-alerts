@@ -445,9 +445,9 @@ def main():
     # Send startup message
     send_telegram(config["telegram_bot_token"], config["telegram_chat_id"],
                   f"🤖 Alert engine started\nWatching {len(config['alerts'])} stocks, {total_alerts} buy levels\n"
-                  f"🇺🇸 US daily check enabled (7 AM IST)")
+                  f"🇺🇸 US check: 10 PM & 1 AM IST (during US market hours)")
     
-    us_check_done_today = False
+    us_check_schedule = "10 PM & 1 AM IST (during US market hours)"
     
     while True:
         try:
@@ -456,21 +456,30 @@ def main():
             state = load_state()
             now = ist_now()
             
-            # ── US MARKET DAILY CHECK (once at ~7 AM IST) ──
-            # US market closes 4 PM ET = 1:30 AM IST (next day)
-            # Run at 7 AM IST to ensure all data is settled
+            # ── US MARKET DAILY CHECK (once during US market hours) ──
+            # US market: 9:30 PM - 4:00 AM IST (next day)
+            # Run at 10 PM IST (30 min after US open) so data is fresh
             current_date = now.strftime("%Y-%m-%d")
-            if now.hour >= 7 and not us_check_done_today:
-                print(f"  [{now.strftime('%H:%M')} IST] Running US market daily check...")
-                try:
-                    run_us_daily_check(config["telegram_bot_token"], config["telegram_chat_id"])
-                    us_check_done_today = True
-                except Exception as e:
-                    print(f"  US check error: {e}")
+            us_hour = now.hour
+            us_minute = now.minute
+            us_time = us_hour * 60 + us_minute
             
-            # Reset US check flag at midnight
-            if now.hour < 7:
-                us_check_done_today = False
+            # 10:00 PM IST = 22:00 = 1320 minutes
+            # Also run at 1:00 AM IST = next day check for late session moves
+            us_run_times = [22 * 60, 1 * 60]  # 10 PM and 1 AM IST
+            
+            for run_time in us_run_times:
+                # Check if we're within 10 minutes of a run time
+                if abs(us_time - run_time) <= 10:
+                    run_key = f"US_{current_date}_{run_time}"
+                    if run_key not in state.get("fired", []):
+                        print(f"  [{now.strftime('%H:%M')} IST] Running US market check (US market is open)...")
+                        try:
+                            run_us_daily_check(config["telegram_bot_token"], config["telegram_chat_id"])
+                            state.setdefault("fired", []).append(run_key)
+                            save_state(state)
+                        except Exception as e:
+                            print(f"  US check error: {e}")
             
             # ── INDIAN MARKET ALERTS ──
             if is_market_open(config):
