@@ -456,31 +456,44 @@ def main():
             state = load_state()
             now = ist_now()
             
-            # ── US MARKET DAILY CHECK (during US market hours) ──
-            # US market (EDT): 9:30 AM - 4:00 PM ET
-            # In IST: 7:00 PM - 1:30 AM (next day)
-            # Run twice: 7:30 PM IST (after open) and 11 PM IST (mid-session)
+            # ── US MARKET DAILY CHECK (during US market hours, weekdays only) ──
+            # US market (EDT): 9:30 AM - 4 PM ET = 7 PM - 1:30 AM IST
+            # US market open Mon-Fri ET. In IST:
+            #   Mon 7 PM IST → Mon night (US Mon)
+            #   Fri 7 PM IST → Fri night (US Fri)
+            #   Sat/Sun → skip (US market closed)
+            # Note: Fri 11 PM IST is still US Friday session — that's fine
             current_date = now.strftime("%Y-%m-%d")
             us_hour = now.hour
             us_minute = now.minute
             us_time = us_hour * 60 + us_minute
+            weekday = now.weekday()  # 0=Mon, 5=Sat, 6=Sun
             
-            # 7:30 PM IST = 19:30 = 1170 minutes
-            # 11:00 PM IST = 23:00 = 1380 minutes
-            us_run_times = [19 * 60 + 30, 23 * 60]  # 7:30 PM and 11 PM IST
+            # Skip weekends: Sat daytime and Sun entirely have no US session
+            # Mon-Fri evening (7 PM+) = US market open
+            # Sat early morning (before 2 AM) = tail end of US Friday session — OK
+            us_market_day = False
+            if weekday <= 4 and us_time >= 19 * 60:
+                us_market_day = True  # Mon-Fri evening IST
+            elif weekday <= 5 and us_time <= 2 * 60:
+                us_market_day = True  # Tue-Sat early morning IST (prev day's US session)
             
-            for run_time in us_run_times:
-                # Check if we're within 10 minutes of a run time
-                if abs(us_time - run_time) <= 10:
-                    run_key = f"US_{current_date}_{run_time}"
-                    if run_key not in state.get("fired", []):
-                        print(f"  [{now.strftime('%H:%M')} IST] Running US market check (US market is open)...")
-                        try:
-                            run_us_daily_check(config["telegram_bot_token"], config["telegram_chat_id"])
-                            state.setdefault("fired", []).append(run_key)
-                            save_state(state)
-                        except Exception as e:
-                            print(f"  US check error: {e}")
+            if us_market_day:
+                # 7:30 PM IST = 19:30 = 1170 minutes
+                # 11:00 PM IST = 23:00 = 1380 minutes
+                us_run_times = [19 * 60 + 30, 23 * 60]
+                
+                for run_time in us_run_times:
+                    if abs(us_time - run_time) <= 10:
+                        run_key = f"US_{current_date}_{run_time}"
+                        if run_key not in state.get("fired", []):
+                            print(f"  [{now.strftime('%H:%M')} IST] Running US market check (US market is open)...")
+                            try:
+                                run_us_daily_check(config["telegram_bot_token"], config["telegram_chat_id"])
+                                state.setdefault("fired", []).append(run_key)
+                                save_state(state)
+                            except Exception as e:
+                                print(f"  US check error: {e}")
             
             # ── INDIAN MARKET ALERTS ──
             if is_market_open(config):
