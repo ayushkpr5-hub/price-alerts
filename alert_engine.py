@@ -223,9 +223,11 @@ def us_analyze_52w(c):
     dd = (price / high_52w - 1) * 100
     upside = (high_52w / price - 1) * 100
 
+    ema5 = c.ewm(span=5).mean().iloc[-1]
     ema20 = c.ewm(span=20).mean().iloc[-1]
     ema50 = c.ewm(span=50).mean().iloc[-1]
     ret_1m = (price / c.iloc[-21] - 1) * 100 if len(c) >= 22 else 0
+    ret_1w = (price / c.iloc[-5] - 1) * 100 if len(c) >= 6 else 0
 
     delta = c.diff()
     gain = delta.where(delta > 0, 0).rolling(14).mean()
@@ -233,12 +235,23 @@ def us_analyze_52w(c):
     rs = gain / (loss + 1e-10)
     rsi = (100 - (100 / (1 + rs))).iloc[-1]
 
+    above_5 = price > ema5
     above_20 = price > ema20
     above_50 = price > ema50
 
+    # Reclaiming EMA20: was below recently, now above or very close
+    was_below_20 = any(c.iloc[-5:-1] < c.ewm(span=20).mean().iloc[-5:-1]) if len(c) >= 6 else False
+    near_ema20 = abs(price - ema20) / ema20 < 0.005  # within 0.5%
+    reclaiming_20 = (above_20 or near_ema20) and was_below_20
+
+    # Momentum turning: above EMA5 + positive weekly return (catches early bounces)
+    momentum_turning = above_5 and ret_1w > 1
+
     return {
         "price": price, "high_52w": high_52w, "dd": dd, "upside": upside,
-        "ret_1m": ret_1m, "rsi": rsi, "above_20": above_20, "above_50": above_50,
+        "ret_1m": ret_1m, "ret_1w": ret_1w, "rsi": rsi,
+        "above_5": above_5, "above_20": above_20, "above_50": above_50,
+        "reclaiming_20": reclaiming_20, "momentum_turning": momentum_turning,
     }
 
 
@@ -363,23 +376,27 @@ def run_us_daily_check(token, chat_id):
         r = us_analyze_52w(c)
 
         # 52w recovery signal
+        # ADD: stock is >5% below 52w high AND showing recovery signs
+        # Recovery signs: above EMA20, OR reclaiming EMA20, OR momentum turning (above EMA5 + positive week)
+        recovering = r["above_20"] or r["reclaiming_20"] or r["momentum_turning"]
+
         if r["dd"] > -3:
             emoji = "🟢"
             tag = ""
-        elif r["dd"] <= -5 and r["above_20"] and r["ret_1m"] > 5:
+        elif r["dd"] <= -5 and recovering and (r["ret_1m"] > 3 or r["ret_1w"] > 2):
             emoji = "🟠"
-            tag = f" ← <b>ADD</b> (+{r['ret_1m']:.0f}% 1m, {r['upside']:.0f}% upside)"
-            actions.append(f"🟠 <b>ADD {sym}</b> — Recovery rally\n"
+            tag = f" ← <b>ADD</b> (1w:{r['ret_1w']:+.0f}%, {r['upside']:.0f}% upside)"
+            actions.append(f"🟠 <b>ADD {sym}</b> — Recovery\n"
                            f"  ${r['price']:.2f} ({r['dd']:+.1f}% from 52w hi)\n"
-                           f"  +{r['ret_1m']:.0f}% in 1m, {r['upside']:.0f}% upside\n"
+                           f"  1w:{r['ret_1w']:+.1f}% 1m:{r['ret_1m']:+.1f}%, {r['upside']:.0f}% upside\n"
                            f"  RSI: {r['rsi']:.0f}")
-        elif r["dd"] <= -5 and r["above_20"]:
+        elif r["dd"] <= -5 and recovering:
             emoji = "🟡"
             tag = f" ← WATCH ({r['upside']:.0f}% upside)"
-        elif r["dd"] <= -10:
-            emoji = "🔴"
-            tag = " ← WAIT (below EMA20)"
         elif r["dd"] <= -5:
+            emoji = "🔴"
+            tag = " ← WAIT (no recovery signs)"
+        elif r["dd"] <= -3:
             emoji = "🟡"
             tag = ""
         else:
