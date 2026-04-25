@@ -418,8 +418,17 @@ def run_us_daily_check(token, chat_id):
                 actions.append(dip_msg)
 
     # ── SECTOR MOMENTUM SCANNER ──
-    # Track all major sectors + their leveraged ETFs
-    # Alert when a sector is breaking out from a dip or leading the market
+    # Same reversal-confirmation logic as per-stock dip detector,
+    # applied to sector ETFs to find entry points in sectors you don't own.
+    #
+    # Entry signal requires:
+    #   1. Sector was in a dip (>10% below 40-day high at some point in last 20 days)
+    #   2. Now showing reversal: above EMA5 + positive weekly return
+    #   3. Outperforming SPY (relative strength positive)
+    #
+    # This would have caught SOXX around Apr 1-2 when semis bounced off
+    # the March bottom with +5% weekly return and crossed above EMA5.
+
     SECTORS = {
         "SOXX": ("Semiconductors", "SOXL"),
         "XLK": ("Technology", "TECL"),
@@ -442,18 +451,17 @@ def run_us_daily_check(token, chat_id):
     for sym in SECTORS:
         try:
             t = yf.Ticker(sym)
-            h = t.history(period="3mo", auto_adjust=True)
+            h = t.history(period="6mo", auto_adjust=True)
             if not h.empty:
                 h.index = h.index.tz_localize(None)
                 sector_data[sym] = h["Close"]
         except Exception:
             pass
 
-    # Also fetch SPY for relative strength
     if "SPY" not in data:
         try:
             t = yf.Ticker("SPY")
-            h = t.history(period="3mo", auto_adjust=True)
+            h = t.history(period="6mo", auto_adjust=True)
             if not h.empty:
                 h.index = h.index.tz_localize(None)
                 data["SPY"] = h["Close"]
@@ -462,62 +470,95 @@ def run_us_daily_check(token, chat_id):
 
     if sector_data and "SPY" in data:
         spy_c = data["SPY"]
-        spy_1w = (spy_c.iloc[-1] / spy_c.iloc[-5] - 1) * 100 if len(spy_c) >= 6 else 0
         spy_1m = (spy_c.iloc[-1] / spy_c.iloc[-21] - 1) * 100 if len(spy_c) >= 22 else 0
 
-        # Rank sectors by 1-month momentum
-        sector_ranks = []
+        sector_results = []
         for sym, (name, leveraged) in SECTORS.items():
             if sym not in sector_data:
                 continue
             sc = sector_data[sym]
-            if len(sc) < 22:
+            if len(sc) < 40:
                 continue
-            ret_1w = (sc.iloc[-1] / sc.iloc[-5] - 1) * 100
-            ret_1m = (sc.iloc[-1] / sc.iloc[-21] - 1) * 100
-            # Relative strength vs SPY
+
+            price = sc.iloc[-1]
+            ret_1w = (price / sc.iloc[-5] - 1) * 100 if len(sc) >= 6 else 0
+            ret_1m = (price / sc.iloc[-21] - 1) * 100 if len(sc) >= 22 else 0
             rs_1m = ret_1m - spy_1m
 
-            # Is it breaking out from a dip?
-            high_40d = sc.iloc[-40:].max() if len(sc) >= 40 else sc.max()
-            dd_40d = (sc.iloc[-1] / high_40d - 1) * 100
-            # Was in a dip recently (>10% down in last 20 days)?
-            was_dipped = any((sc.iloc[max(0,len(sc)-20):] / high_40d - 1) * 100 < -10)
-            breakout = was_dipped and dd_40d > -5 and ret_1w > 3
+            # Was in a dip? Check if any day in last 20 was >10% below 40-day high
+            high_40d = sc.iloc[-40:].max()
+            dd_now = (price / high_40d - 1) * 100
+            was_in_dip = False
+            for d in range(max(0, len(sc)-20), len(sc)):
+                h40 = sc.iloc[max(0,d-40):d+1].max()
+                if (sc.iloc[d] / h40 - 1) * 100 < -10:
+                    was_in_dip = True
+                    break
 
-            sector_ranks.append({
+            # Reversal signals (same logic as per-stock)
+            ema5 = sc.ewm(span=5).mean().iloc[-1]
+            ema20 = sc.ewm(span=20).mean().iloc[-1]
+            above_ema5 = price > ema5
+            above_ema20 = price > ema20
+
+            # RSI
+            delta = sc.diff()
+            gain = delta.where(delta > 0, 0).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs_val = gain / (loss + 1e-10)
+            rsi = (100 - (100 / (1 + rs_val))).iloc[-1]
+
+            # Entry signal: was in dip + now bouncing + outperforming
+            entry = "NONE"
+            if was_in_dip and above_ema5 and ret_1w > 3 and rs_1m > 5:
+                entry = "ENTER"  # Strong: dip recovery + outperforming SPY
+            elif was_in_dip and above_ema5 and ret_1w > 2:
+                entry = "WATCH"  # Bouncing but not yet outperforming
+            elif not was_in_dip and rs_1m > 10 and ret_1m > 15:
+                entry = "HOT"    # No dip, just massively outperforming
+
+            sector_results.append({
                 "sym": sym, "name": name, "leveraged": leveraged,
-                "ret_1w": ret_1w, "ret_1m": ret_1m, "rs_1m": rs_1m,
-                "dd_40d": dd_40d, "breakout": breakout,
+                "price": price, "ret_1w": ret_1w, "ret_1m": ret_1m,
+                "rs_1m": rs_1m, "dd_now": dd_now, "was_in_dip": was_in_dip,
+                "above_ema5": above_ema5, "above_ema20": above_ema20,
+                "rsi": rsi, "entry": entry,
             })
 
-        sector_ranks.sort(key=lambda x: -x["ret_1m"])
+        sector_results.sort(key=lambda x: -x["ret_1m"])
 
-        # Show top 5 sectors + any breakouts
-        lines.append("\n<b>🔥 Sector Momentum (top 5):</b>")
-        for i, s in enumerate(sector_ranks[:5]):
+        # Show top 5 + any entry signals
+        lines.append("\n<b>🔥 Sector Momentum:</b>")
+        for i, s in enumerate(sector_results[:5]):
             lev = f" ({s['leveraged']})" if s['leveraged'] else ""
             rs_emoji = "🟢" if s["rs_1m"] > 5 else ("🟡" if s["rs_1m"] > 0 else "🔴")
-            breakout_tag = " ⚡BREAKOUT" if s["breakout"] else ""
+            entry_tag = ""
+            if s["entry"] == "ENTER":
+                entry_tag = " ⚡ENTER"
+            elif s["entry"] == "HOT":
+                entry_tag = " 🔥HOT"
             lines.append(f"  {i+1}. {rs_emoji} {s['name']}: 1m:{s['ret_1m']:+.0f}% "
-                         f"vs SPY:{s['rs_1m']:+.0f}%{lev}{breakout_tag}")
+                         f"vs SPY:{s['rs_1m']:+.0f}%{lev}{entry_tag}")
 
-        # Alert on breakouts (sector recovering from dip)
-        breakouts = [s for s in sector_ranks if s["breakout"]]
-        if breakouts:
-            for s in breakouts:
-                lev_msg = f"\n  Leveraged: {s['leveraged']}" if s['leveraged'] else ""
-                actions.append(f"⚡ <b>SECTOR BREAKOUT: {s['name']}</b> ({s['sym']})\n"
-                               f"  1w:{s['ret_1w']:+.1f}% 1m:{s['ret_1m']:+.1f}% "
-                               f"vs SPY:{s['rs_1m']:+.1f}%{lev_msg}")
+        # Generate action alerts for ENTER signals
+        enter_sectors = [s for s in sector_results if s["entry"] == "ENTER"]
+        for s in enter_sectors:
+            lev_msg = f"\n  Leveraged ETF: {s['leveraged']}" if s['leveraged'] else ""
+            actions.append(
+                f"⚡ <b>SECTOR ENTRY: {s['name']}</b> ({s['sym']})\n"
+                f"  Was in dip, now bouncing with confirmation\n"
+                f"  1w:{s['ret_1w']:+.1f}% 1m:{s['ret_1m']:+.1f}% vs SPY:{s['rs_1m']:+.1f}%\n"
+                f"  Above EMA5 ✓ RSI:{s['rsi']:.0f}{lev_msg}"
+            )
 
-        # Alert on sectors massively outperforming (>15% in 1 month, >10% vs SPY)
-        hot_sectors = [s for s in sector_ranks if s["rs_1m"] > 10 and s["ret_1m"] > 15
-                       and not s["breakout"]]
+        # Also alert on HOT sectors
+        hot_sectors = [s for s in sector_results if s["entry"] == "HOT"]
         for s in hot_sectors:
-            lev_msg = f"\n  Leveraged: {s['leveraged']}" if s['leveraged'] else ""
-            actions.append(f"🔥 <b>HOT SECTOR: {s['name']}</b> ({s['sym']})\n"
-                           f"  1m:{s['ret_1m']:+.1f}% (SPY:{spy_1m:+.1f}%){lev_msg}")
+            lev_msg = f"\n  Leveraged ETF: {s['leveraged']}" if s['leveraged'] else ""
+            actions.append(
+                f"🔥 <b>HOT SECTOR: {s['name']}</b> ({s['sym']})\n"
+                f"  1m:{s['ret_1m']:+.1f}% (SPY:{spy_1m:+.1f}%){lev_msg}"
+            )
 
     # Actions
     if actions:
