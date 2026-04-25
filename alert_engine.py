@@ -445,7 +445,7 @@ def main():
     # Send startup message
     send_telegram(config["telegram_bot_token"], config["telegram_chat_id"],
                   f"🤖 Alert engine started\nWatching {len(config['alerts'])} stocks, {total_alerts} buy levels\n"
-                  f"🇺🇸 US check: 10 PM & 1 AM IST (during US market hours)")
+                  f"🇺🇸 US check: 7:30 PM & 11 PM IST (during US market hours)")
     
     us_check_schedule = "10 PM & 1 AM IST (during US market hours)"
     
@@ -456,17 +456,18 @@ def main():
             state = load_state()
             now = ist_now()
             
-            # ── US MARKET DAILY CHECK (once during US market hours) ──
-            # US market: 9:30 PM - 4:00 AM IST (next day)
-            # Run at 10 PM IST (30 min after US open) so data is fresh
+            # ── US MARKET DAILY CHECK (during US market hours) ──
+            # US market (EDT): 9:30 AM - 4:00 PM ET
+            # In IST: 7:00 PM - 1:30 AM (next day)
+            # Run twice: 7:30 PM IST (after open) and 11 PM IST (mid-session)
             current_date = now.strftime("%Y-%m-%d")
             us_hour = now.hour
             us_minute = now.minute
             us_time = us_hour * 60 + us_minute
             
-            # 10:00 PM IST = 22:00 = 1320 minutes
-            # Also run at 1:00 AM IST = next day check for late session moves
-            us_run_times = [22 * 60, 1 * 60]  # 10 PM and 1 AM IST
+            # 7:30 PM IST = 19:30 = 1170 minutes
+            # 11:00 PM IST = 23:00 = 1380 minutes
+            us_run_times = [19 * 60 + 30, 23 * 60]  # 7:30 PM and 11 PM IST
             
             for run_time in us_run_times:
                 # Check if we're within 10 minutes of a run time
