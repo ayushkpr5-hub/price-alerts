@@ -579,11 +579,23 @@ def run_us_daily_check(token, chat_id):
 
         sector_results.sort(key=lambda x: -x["ret_1m"])
 
-        # Show top 5 + any entry signals
+        # Show ALL sectors ranked by 1-month return
+        # Add "turning up" indicator for sectors with positive weekly return
+        # but negative monthly return (rotation starting)
         lines.append("\n<b>🔥 Sector Momentum:</b>")
-        for i, s in enumerate(sector_results[:5]):
+        for i, s in enumerate(sector_results):
             lev = f" ({s['leveraged']})" if s['leveraged'] else ""
             rs_emoji = "🟢" if s["rs_1m"] > 5 else ("🟡" if s["rs_1m"] > 0 else "🔴")
+
+            # Detect sector rotation: was lagging but now turning up
+            # Lagging = 1-month relative strength vs SPY is negative
+            # Turning up = 1-week return is positive AND 1-week RS > 1-month RS
+            # This means money is rotating INTO this sector recently
+            turning_up = ""
+            weekly_rs = s["ret_1w"] - (spy_1m / 4)  # approximate weekly SPY
+            monthly_rs = s["rs_1m"]
+            if monthly_rs < 0 and s["ret_1w"] > 1 and weekly_rs > monthly_rs + 3:
+                turning_up = " ↗️turning"
             entry_tag = ""
             if s["entry"] == "ENTER" and s["sym"] not in wait_for_dip_syms:
                 entry_tag = " ⚡ENTER"
@@ -593,8 +605,8 @@ def run_us_daily_check(token, chat_id):
                 entry_tag = " ⏳RSI high, wait for pullback"
             elif s["entry"] == "HOT":
                 entry_tag = " 🔥HOT"
-            lines.append(f"  {i+1}. {rs_emoji} {s['name']}: 1m:{s['ret_1m']:+.0f}% "
-                         f"vs SPY:{s['rs_1m']:+.0f}%{lev}{entry_tag}")
+            lines.append(f"  {i+1}. {rs_emoji} {s['name']}: 1w:{s['ret_1w']:+.0f}% 1m:{s['ret_1m']:+.0f}% "
+                         f"vs SPY:{s['rs_1m']:+.0f}%{lev}{entry_tag}{turning_up}")
 
         # Generate action alerts for ENTER signals
         # Skip if momentum watchlist says "wait for pullback" (avoid contradiction)
