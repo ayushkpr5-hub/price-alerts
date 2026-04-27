@@ -727,12 +727,10 @@ def run_us_daily_check(token, chat_id):
         watches = [s for s in pullback_signals if s["signal"] == "WATCH"]
         waits = [s for s in pullback_signals if s["signal"] == "WAIT_FOR_DIP"]
 
-        if enters or watches or waits:
+        if pullback_signals:
             lines.append("\n<b>📋 Momentum Watchlist:</b>")
 
             for s in pullback_signals:
-                if s["signal"] == "NONE":
-                    continue
                 lev_str = f" ({s['lev']})" if s['lev'] else ""
                 if s["signal"] == "ENTER":
                     lines.append(f"  🎯 {s['name']}{lev_str}: ${s['price']:.2f} — <b>ENTER</b> {s['detail']}")
@@ -740,6 +738,10 @@ def run_us_daily_check(token, chat_id):
                     lines.append(f"  🟡 {s['name']}{lev_str}: ${s['price']:.2f} — {s['detail']}")
                 elif s["signal"] == "WAIT_FOR_DIP":
                     lines.append(f"  ⏳ {s['name']}{lev_str}: ${s['price']:.2f} — {s['detail']}")
+                elif s["signal"] == "NEAR_HIGH":
+                    lines.append(f"  📍 {s['name']}{lev_str}: ${s['price']:.2f} — {s['detail']}, dipping — watch for -3%")
+                elif s["signal"] == "NONE" and s["ret_1m"] > 5:
+                    lines.append(f"  ⚪ {s['name']}{lev_str}: ${s['price']:.2f} — {s['dd']:+.1f}% from high, 1m:{s['ret_1m']:+.0f}%")
 
         # Add ENTER signals to actions
         for s in enters:
