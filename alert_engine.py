@@ -239,9 +239,9 @@ US_INDICES = [("SPY", "S&P 500"), ("QQQ", "NASDAQ"), ("SOXX", "Semis")]
 
 # Momentum Pullback Watchlist — stocks/ETFs you WANT to enter on a dip
 # These are in strong uptrends; alert when they pull back 3-5% and bounce
+# Analysis runs on the SECTOR ETF (not leveraged) — leveraged shown as option
 US_MOMENTUM_WATCHLIST = [
     ("SOXX", "Semiconductors", "SOXL"),
-    ("SOXL", "3x Semis", None),
     ("XLK", "Technology", "TECL"),
     ("QQQ", "NASDAQ 100", "TQQQ"),
     ("AMD", "AMD", None),
