@@ -456,7 +456,12 @@ def run_us_daily_check(token, chat_id):
     # ── SECTOR MOMENTUM SCANNER ──
     # Note: wait_for_dip_syms is populated by momentum pullback section below.
     # We initialize it here and the sector scanner will filter at the end.
+    # Map leveraged ETFs to their sector ETFs so conflicts are caught
     wait_for_dip_syms = set()
+    LEVERAGED_TO_SECTOR = {
+        "SOXL": "SOXX", "TECL": "XLK", "FAS": "XLF", "ERX": "XLE",
+        "CURE": "XLV", "NUGT": "GDX", "TNA": "IWM", "TQQQ": "QQQ",
+    }
 
     # Same reversal-confirmation logic as per-stock dip detector,
     # applied to sector ETFs to find entry points in sectors you don't own.
@@ -573,8 +578,10 @@ def run_us_daily_check(token, chat_id):
             lev = f" ({s['leveraged']})" if s['leveraged'] else ""
             rs_emoji = "🟢" if s["rs_1m"] > 5 else ("🟡" if s["rs_1m"] > 0 else "🔴")
             entry_tag = ""
-            if s["entry"] == "ENTER":
+            if s["entry"] == "ENTER" and s["sym"] not in wait_for_dip_syms:
                 entry_tag = " ⚡ENTER"
+            elif s["entry"] == "ENTER" and s["sym"] in wait_for_dip_syms:
+                entry_tag = " ⏳wait for pullback"
             elif s["entry"] == "HOT":
                 entry_tag = " 🔥HOT"
             lines.append(f"  {i+1}. {rs_emoji} {s['name']}: 1m:{s['ret_1m']:+.0f}% "
@@ -690,7 +697,20 @@ def run_us_daily_check(token, chat_id):
 
         # Collect symbols where momentum watchlist says "wait for pullback"
         # so sector scanner actions can be filtered
-        wait_for_dip_syms.update(s["sym"] for s in pullback_signals if s["signal"] == "WAIT_FOR_DIP")
+        # Also map leveraged ETFs to their underlying sector ETFs
+        for s in pullback_signals:
+            if s["signal"] == "WAIT_FOR_DIP":
+                wait_for_dip_syms.add(s["sym"])
+                # Also add the underlying sector ETF
+                underlying = LEVERAGED_TO_SECTOR.get(s["sym"])
+                if underlying:
+                    wait_for_dip_syms.add(underlying)
+            elif s["signal"] == "WATCH":
+                # WATCH also means don't enter via sector scanner
+                wait_for_dip_syms.add(s["sym"])
+                underlying = LEVERAGED_TO_SECTOR.get(s["sym"])
+                if underlying:
+                    wait_for_dip_syms.add(underlying)
 
         # Show watchlist status
         enters = [s for s in pullback_signals if s["signal"] == "ENTER"]
