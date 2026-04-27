@@ -82,20 +82,43 @@ def send_telegram(token, chat_id, message):
         return False
     
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = json.dumps({
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "HTML",
-    }).encode()
     
-    try:
-        req = urllib.request.Request(url, data=payload,
-                                     headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10)
-        return True
-    except Exception as e:
-        print(f"  Telegram error: {e}")
-        return False
+    # Telegram has 4096 char limit — split if needed
+    messages = []
+    if len(message) <= 4000:
+        messages = [message]
+    else:
+        # Split on double newlines to keep sections together
+        parts = message.split("\n\n")
+        current = ""
+        for part in parts:
+            if len(current) + len(part) + 2 > 4000:
+                if current:
+                    messages.append(current)
+                current = part
+            else:
+                current = current + "\n\n" + part if current else part
+        if current:
+            messages.append(current)
+    
+    success = True
+    for msg in messages:
+        payload = json.dumps({
+            "chat_id": chat_id,
+            "text": msg,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }).encode()
+        
+        try:
+            req = urllib.request.Request(url, data=payload,
+                                         headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=15)
+        except Exception as e:
+            print(f"  Telegram error: {e}")
+            success = False
+    
+    return success
 
 
 def fetch_prices(symbols):
