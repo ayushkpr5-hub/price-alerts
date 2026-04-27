@@ -554,9 +554,16 @@ def run_us_daily_check(token, chat_id):
             rsi = (100 - (100 / (1 + rs_val))).iloc[-1]
 
             # Entry signal: was in dip + now bouncing + outperforming
+            # BUT: if RSI > 85, the move is extended — wait for pullback instead
             entry = "NONE"
-            if was_in_dip and above_ema5 and ret_1w > 3 and rs_1m > 5:
-                entry = "ENTER"  # Strong: dip recovery + outperforming SPY
+            if rsi > 85:
+                # Overbought — even if all other conditions met, don't say ENTER
+                if was_in_dip and above_ema5 and rs_1m > 5:
+                    entry = "WAIT_PULLBACK"  # Was a valid entry, but too late now
+                elif rs_1m > 10 and ret_1m > 15:
+                    entry = "HOT"
+            elif was_in_dip and above_ema5 and ret_1w > 3 and rs_1m > 5:
+                entry = "ENTER"  # Strong: dip recovery + outperforming SPY + not overbought
             elif was_in_dip and above_ema5 and ret_1w > 2:
                 entry = "WATCH"  # Bouncing but not yet outperforming
             elif not was_in_dip and rs_1m > 10 and ret_1m > 15:
@@ -580,8 +587,10 @@ def run_us_daily_check(token, chat_id):
             entry_tag = ""
             if s["entry"] == "ENTER" and s["sym"] not in wait_for_dip_syms:
                 entry_tag = " ⚡ENTER"
-            elif s["entry"] == "ENTER" and s["sym"] in wait_for_dip_syms:
+            elif s["entry"] in ("ENTER", "WAIT_PULLBACK") and s["sym"] in wait_for_dip_syms:
                 entry_tag = " ⏳wait for pullback"
+            elif s["entry"] == "WAIT_PULLBACK":
+                entry_tag = " ⏳RSI high, wait for pullback"
             elif s["entry"] == "HOT":
                 entry_tag = " 🔥HOT"
             lines.append(f"  {i+1}. {rs_emoji} {s['name']}: 1m:{s['ret_1m']:+.0f}% "
@@ -590,7 +599,8 @@ def run_us_daily_check(token, chat_id):
         # Generate action alerts for ENTER signals
         # Skip if momentum watchlist says "wait for pullback" (avoid contradiction)
         enter_sectors = [s for s in sector_results
-                         if s["entry"] == "ENTER" and s["sym"] not in wait_for_dip_syms]
+                         if s["entry"] == "ENTER" and s["sym"] not in wait_for_dip_syms
+                         and s.get("rsi", 0) <= 85]
         for s in enter_sectors:
             lev_msg = f"\n  Leveraged ETF: {s['leveraged']}" if s['leveraged'] else ""
             actions.append(
