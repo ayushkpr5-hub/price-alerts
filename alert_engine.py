@@ -149,6 +149,111 @@ def fetch_prices(symbols):
         return {}
 
 
+def check_auto_levels(config, state, prices, token, chat_id):
+    """Auto-detect support/resistance levels and alert on crosses."""
+    import yfinance as yf
+    from auto_levels import detect_levels, format_levels_text
+    
+    print("  [AUTO] Detecting support/resistance levels...")
+    
+    for alert in config["alerts"]:
+        sym = alert["symbol"]
+        name = alert["name"]
+        price = prices.get(sym)
+        
+        if price is None:
+            continue
+        
+        # Fetch 6 months of daily data
+        try:
+            ticker = yf.Ticker(f"{sym}.NS")
+            hist = ticker.history(period="6mo", auto_adjust=True)
+            if hist.empty or len(hist) < 30:
+                continue
+            
+            # Flatten multi-level columns if needed
+            if hasattr(hist.columns, 'levels') and hist.columns.nlevels > 1:
+                hist.columns = hist.columns.get_level_values(0)
+            
+            hist.index = hist.index.tz_localize(None) if hist.index.tz else hist.index
+        except Exception as e:
+            print(f"  [AUTO] {sym}: fetch error - {e}")
+            continue
+        
+        # Detect levels
+        levels = detect_levels(hist, current_price=price)
+        
+        if not levels["buy_levels"] and not levels["breakout_levels"]:
+            continue
+        
+        # Check if price just crossed any auto-detected level
+        # "Just crossed" = price is within 1.5% of the level
+        
+        for bl in levels["breakout_levels"]:
+            key = f"AUTO_{sym}_BREAK_{int(bl)}"
+            if key in state.get("fired", []):
+                continue
+            
+            pct_above = (price / bl - 1) * 100
+            if 0 <= pct_above <= 1.5:
+                # Fresh breakout!
+                msg = (f"🚀 <b>AUTO BREAKOUT</b>\n"
+                       f"<b>{name}</b> ({sym})\n"
+                       f"Price: ₹{price} crossed ₹{bl:.0f}\n"
+                       f"Level type: {levels['resistance'][levels['breakout_levels'].index(bl)]['type'] if bl in levels['breakout_levels'] and levels['breakout_levels'].index(bl) < len(levels['resistance']) else 'auto-detected'}\n"
+                       f"Next resistance: ₹{levels['breakout_levels'][levels['breakout_levels'].index(bl)+1]:.0f}" if levels['breakout_levels'].index(bl) + 1 < len(levels['breakout_levels']) else "")
+                
+                # Simplify the message
+                next_res = ""
+                idx = levels["breakout_levels"].index(bl)
+                if idx + 1 < len(levels["breakout_levels"]):
+                    next_res = f"\nNext target: ₹{levels['breakout_levels'][idx+1]:.0f}"
+                
+                msg = (f"🚀 <b>AUTO BREAKOUT</b>\n"
+                       f"<b>{name}</b> ({sym})\n"
+                       f"₹{price} crossed ₹{bl:.0f}!{next_res}")
+                
+                print(f"  [AUTO] BREAKOUT: {name} at ₹{price} (level ₹{bl:.0f})")
+                send_telegram(token, chat_id, msg)
+                state.setdefault("fired", []).append(key)
+                save_state(state)
+        
+        for sl in levels["buy_levels"]:
+            key = f"AUTO_{sym}_DIP_{int(sl)}"
+            if key in state.get("fired", []):
+                continue
+            
+            pct_below = (1 - price / sl) * 100
+            if 0 <= pct_below <= 1.5:
+                # Fresh dip to support!
+                next_sup = ""
+                idx = levels["buy_levels"].index(sl)
+                if idx + 1 < len(levels["buy_levels"]):
+                    next_sup = f"\nNext support: ₹{levels['buy_levels'][idx+1]:.0f}"
+                
+                msg = (f"🟢 <b>AUTO SUPPORT HIT</b>\n"
+                       f"<b>{name}</b> ({sym})\n"
+                       f"₹{price} at support ₹{sl:.0f}{next_sup}")
+                
+                print(f"  [AUTO] SUPPORT: {name} at ₹{price} (level ₹{sl:.0f})")
+                send_telegram(token, chat_id, msg)
+                state.setdefault("fired", []).append(key)
+                save_state(state)
+        
+        # Check stoploss
+        if levels["stoploss"] and price <= levels["stoploss"]:
+            key = f"AUTO_{sym}_SL"
+            if key not in state.get("fired", []):
+                msg = (f"🔴 <b>AUTO STOPLOSS</b>\n"
+                       f"<b>{name}</b> ({sym})\n"
+                       f"₹{price} below auto-SL ₹{levels['stoploss']:.0f}")
+                send_telegram(token, chat_id, msg)
+                state.setdefault("fired", []).append(key)
+                save_state(state)
+    
+    print("  [AUTO] Done.")
+
+
 def check_alerts(config, state):
     """Check all alerts and send notifications."""
     symbols = [a["symbol"] for a in config["alerts"]]
@@ -159,6 +264,17 @@ def check_alerts(config, state):
     
     token = config["telegram_bot_token"]
     chat_id = config["telegram_chat_id"]
+    
+    # ── AUTO-LEVEL DETECTION ──
+    # Run once per day: fetch history, detect levels, check against current price
+    auto_key = f"AUTO_LEVELS_{today()}"
+    if auto_key not in state.get("fired", []):
+        try:
+            check_auto_levels(config, state, prices, token, chat_id)
+            state.setdefault("fired", []).append(auto_key)
+            save_state(state)
+        except Exception as e:
+            print(f"  Auto-levels error: {e}")
     
     for alert in config["alerts"]:
         sym = alert["symbol"]
