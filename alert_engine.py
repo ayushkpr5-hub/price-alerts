@@ -175,6 +175,15 @@ def check_alerts(config, state):
                 continue
             
             if price <= level:
+                # Skip if price is already way below the level (>3%) — means
+                # dip happened in the past and we missed it (e.g., after restart)
+                pct_below = (1 - price / level) * 100
+                if pct_below > 3:
+                    print(f"  [SKIP] {name} already {pct_below:.1f}% below ₹{level} — old dip")
+                    state["fired"].append(key)
+                    save_state(state)
+                    continue
+                
                 msg = (f"🟢 <b>BUY DIP</b>\n"
                        f"<b>{name}</b> ({sym})\n"
                        f"Price: ₹{price} (target: ₹{level})\n"
@@ -192,6 +201,15 @@ def check_alerts(config, state):
                 continue
             
             if price >= level:
+                # Skip if price is already way above the level (>3%) — means
+                # breakout happened in the past and we missed it (e.g., after restart)
+                pct_above = (price / level - 1) * 100
+                if pct_above > 3:
+                    print(f"  [SKIP] {name} already {pct_above:.1f}% above ₹{level} — old breakout")
+                    state["fired"].append(key)
+                    save_state(state)
+                    continue
+                
                 msg = (f"🚀 <b>BREAKOUT</b>\n"
                        f"<b>{name}</b> ({sym})\n"
                        f"Price: ₹{price} crossed ₹{level}!\n"
