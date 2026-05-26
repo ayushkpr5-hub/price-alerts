@@ -1,5 +1,5 @@
 {
-  "telegram_bot_token": "8611408146:AAHN1R4JA6NETa0wxk3QKkxg4hMV3RYX4sM",
+  "telegram_bot_token": "SET_VIA_ENV_VAR",
   "telegram_chat_id": "1357505565",
   "check_interval_seconds": 120,
   "market_open": "09:15",

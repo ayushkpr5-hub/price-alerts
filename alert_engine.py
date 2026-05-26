@@ -33,8 +33,15 @@ STATE_PATH = Path(__file__).parent / ".state.json"
 
 
 def load_config():
+    import os
     with open(CONFIG_PATH) as f:
-        return json.load(f)
+        cfg = json.load(f)
+    # Allow overriding token via environment variable (safer than storing in file)
+    if os.environ.get("TELEGRAM_BOT_TOKEN"):
+        cfg["telegram_bot_token"] = os.environ["TELEGRAM_BOT_TOKEN"]
+    if os.environ.get("TELEGRAM_CHAT_ID"):
+        cfg["telegram_chat_id"] = os.environ["TELEGRAM_CHAT_ID"]
+    return cfg
 
 
 def load_state():
