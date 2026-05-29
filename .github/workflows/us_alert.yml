@@ -1,0 +1,39 @@
+name: US Market Alert
+
+on:
+  schedule:
+    # 7:30 PM IST = 14:00 UTC (Mon-Fri)
+    - cron: '0 14 * * 1-5'
+    # 11:00 PM IST = 17:30 UTC (Mon-Fri)
+    - cron: '30 17 * * 1-5'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  us-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance numpy pandas
+
+      - name: Run US Market Check
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import os, sys
+          sys.path.insert(0, '.')
+          os.environ['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+          os.environ['TELEGRAM_CHAT_ID'] = os.environ.get('TELEGRAM_CHAT_ID', '')
+          from alert_engine import run_us_daily_check
+          token = os.environ['TELEGRAM_BOT_TOKEN']
+          chat_id = os.environ['TELEGRAM_CHAT_ID']
+          print(f'Token: {token[:10]}...')
+          run_us_daily_check(token, chat_id)
+          "

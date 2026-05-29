@@ -1,0 +1,46 @@
+name: India Market Alert
+
+on:
+  schedule:
+    # Every 5 minutes during Indian market hours (9:15-15:30 IST = 3:45-10:00 UTC)
+    - cron: '*/5 3-10 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  india-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance numpy pandas
+
+      - name: Run India Market Check
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import os, sys, json
+          sys.path.insert(0, '.')
+          
+          # Set env vars for the engine
+          os.environ['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+          os.environ['TELEGRAM_CHAT_ID'] = os.environ.get('TELEGRAM_CHAT_ID', '')
+          
+          from alert_engine import load_config, load_state, save_state, check_alerts, fetch_prices, send_telegram, today
+          
+          config = load_config()
+          state = load_state()
+          
+          # Override token from env
+          config['telegram_bot_token'] = os.environ['TELEGRAM_BOT_TOKEN']
+          config['telegram_chat_id'] = os.environ['TELEGRAM_CHAT_ID']
+          
+          check_alerts(config, state)
+          print('Done.')
+          "
