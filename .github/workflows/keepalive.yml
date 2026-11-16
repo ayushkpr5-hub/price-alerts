@@ -1,0 +1,30 @@
+name: Keepalive
+
+# GitHub disables a repository's scheduled workflows after 60 days with no
+# activity. That is what silently stopped the alerts between 29 July and
+# 16 November 2026. This job makes an empty commit twice a month so the clock
+# never reaches 60 days, which means no laptop is needed to keep them running.
+#
+# Twice a month rather than once, because GitHub drops scheduled runs when it is
+# busy, and two chances every 30 days leaves a wide margin inside the 60 days.
+
+on:
+  schedule:
+    - cron: '0 6 1,15 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make an empty commit so the schedules stay enabled
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keepalive so scheduled workflows stay enabled"
+          git push origin HEAD:main
