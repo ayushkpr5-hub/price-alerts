@@ -31,6 +31,11 @@ import sys
 CONFIG_PATH = Path(__file__).parent / "config.json"
 STATE_PATH = Path(__file__).parent / ".state.json"
 
+# Every delivery failure is recorded here so a caller can exit non-zero.
+# Until Nov 2026 send_telegram swallowed its errors and returned False, which
+# nobody checked, so the scheduled runs stayed green while nothing arrived.
+SEND_FAILURES = []
+
 
 def load_config():
     import os
@@ -86,6 +91,7 @@ def is_market_open(config):
 def send_telegram(token, chat_id, message):
     if not token or not chat_id:
         print(f"  [NO TELEGRAM] {message}")
+        SEND_FAILURES.append("no bot token or chat id was set")
         return False
     
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -121,8 +127,22 @@ def send_telegram(token, chat_id, message):
             req = urllib.request.Request(url, data=payload,
                                          headers={"Content-Type": "application/json"})
             urllib.request.urlopen(req, timeout=15)
+        except urllib.error.HTTPError as e:
+            # Report the status and Telegram's own wording only. Never print the
+            # exception object or e.url: the request URL contains the bot token,
+            # and these logs are public on a public repository.
+            try:
+                desc = json.loads(e.read().decode()).get("description", "")
+            except Exception:
+                desc = ""
+            why = f"Telegram returned HTTP {e.code}" + (f": {desc}" if desc else "")
+            print(f"  {why}")
+            SEND_FAILURES.append(why)
+            success = False
         except Exception as e:
-            print(f"  Telegram error: {e}")
+            why = f"send failed ({type(e).__name__})"
+            print(f"  {why}")
+            SEND_FAILURES.append(why)
             success = False
     
     return success

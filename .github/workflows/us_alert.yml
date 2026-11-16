@@ -21,6 +21,9 @@ jobs:
       - name: Install dependencies
         run: pip install yfinance numpy pandas
 
+      # Nothing here may print a secret, or any part of one. This repository is
+      # public, so its Actions logs are public too. An earlier version of this
+      # step printed token[:10], which published the bot id on every run.
       - name: Run US Market Check
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -29,11 +32,14 @@ jobs:
           python -c "
           import os, sys
           sys.path.insert(0, '.')
-          os.environ['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-          os.environ['TELEGRAM_CHAT_ID'] = os.environ.get('TELEGRAM_CHAT_ID', '')
-          from alert_engine import run_us_daily_check
-          token = os.environ['TELEGRAM_BOT_TOKEN']
-          chat_id = os.environ['TELEGRAM_CHAT_ID']
-          print(f'Token: {token[:10]}...')
-          run_us_daily_check(token, chat_id)
+          import alert_engine
+          token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+          chat_id = os.environ.get('TELEGRAM_CHAT_ID', '')
+          if not token or not chat_id:
+              sys.exit('TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing. Set both under Settings, Secrets and variables, Actions.')
+          print(f'Secrets present: token {len(token)} chars, chat id {len(chat_id)} chars.')
+          alert_engine.run_us_daily_check(token, chat_id)
+          if alert_engine.SEND_FAILURES:
+              sys.exit('Telegram delivery failed, so nothing reached the phone: ' + '; '.join(sorted(set(alert_engine.SEND_FAILURES))))
+          print('Done.')
           "

@@ -1,6 +1,7 @@
 {
-  "telegram_bot_token": "SET_VIA_ENV_VAR",
-  "telegram_chat_id": "1357505565",
+  "_secrets": "Both values below stay empty in git. load_config() reads TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from the environment; Actions supplies them from repository secrets.",
+  "telegram_bot_token": "",
+  "telegram_chat_id": "",
   "check_interval_seconds": 120,
   "market_open": "09:15",
   "market_close": "15:30",

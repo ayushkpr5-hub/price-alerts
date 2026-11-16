@@ -19,28 +19,27 @@ jobs:
       - name: Install dependencies
         run: pip install yfinance numpy pandas
 
+      # Nothing here may print a secret, or any part of one. This repository is
+      # public, so its Actions logs are public too.
       - name: Run India Market Check
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python -c "
-          import os, sys, json
+          import os, sys
           sys.path.insert(0, '.')
-          
-          # Set env vars for the engine
-          os.environ['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-          os.environ['TELEGRAM_CHAT_ID'] = os.environ.get('TELEGRAM_CHAT_ID', '')
-          
-          from alert_engine import load_config, load_state, save_state, check_alerts, fetch_prices, send_telegram, today
-          
-          config = load_config()
-          state = load_state()
-          
-          # Override token from env
-          config['telegram_bot_token'] = os.environ['TELEGRAM_BOT_TOKEN']
-          config['telegram_chat_id'] = os.environ['TELEGRAM_CHAT_ID']
-          
-          check_alerts(config, state)
+          import alert_engine
+          token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+          chat_id = os.environ.get('TELEGRAM_CHAT_ID', '')
+          if not token or not chat_id:
+              sys.exit('TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing. Set both under Settings, Secrets and variables, Actions.')
+          print(f'Secrets present: token {len(token)} chars, chat id {len(chat_id)} chars.')
+          config = alert_engine.load_config()
+          config['telegram_bot_token'] = token
+          config['telegram_chat_id'] = chat_id
+          alert_engine.check_alerts(config, alert_engine.load_state())
+          if alert_engine.SEND_FAILURES:
+              sys.exit('Telegram delivery failed, so nothing reached the phone: ' + '; '.join(sorted(set(alert_engine.SEND_FAILURES))))
           print('Done.')
           "
